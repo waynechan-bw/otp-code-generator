@@ -19,20 +19,48 @@
   >
     <div id="totp-zone" style="display: none">
       <h1>Current TOTP Code</h1>
+
+      <!-- Interactive, tap-to-copy display field -->
       <div
-        id="otp-display"
+        id="otp-container"
+        onclick="copyToClipboard()"
         style="
-          font-size: 5em;
-          font-weight: bold;
-          letter-spacing: 5px;
-          margin: 20px 0;
-          color: #28a745;
-          font-family: monospace;
+          display: inline-block;
+          cursor: pointer;
+          background: white;
+          padding: 15px 40px;
+          border-radius: 12px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+          border: 2px solid #e2e8f0;
+          transition: transform 0.1s ease;
         "
       >
-        000000
+        <div
+          id="otp-display"
+          style="
+            font-size: 5em;
+            font-weight: bold;
+            letter-spacing: 5px;
+            color: #28a745;
+            font-family: monospace;
+          "
+        >
+          000000
+        </div>
+        <div
+          id="copy-status"
+          style="
+            font-size: 0.9em;
+            color: #007bff;
+            font-weight: 500;
+            margin-top: 5px;
+          "
+        >
+          Tap to Copy Code
+        </div>
       </div>
-      <p style="font-size: 1.2em; color: #555">
+
+      <p style="font-size: 1.2em; color: #555; margin-top: 25px">
         Time remaining:
         <span id="timer" style="font-weight: bold; color: #dc3545">--</span>s
       </p>
@@ -130,6 +158,33 @@
         }
       }
 
+      // Native Async Clipboard copy mechanism with UI fallback animation
+      function copyToClipboard() {
+        const codeText = document.getElementById("otp-display").innerText;
+        const statusLabel = document.getElementById("copy-status");
+        const container = document.getElementById("otp-container");
+
+        if (codeText === "000000" || codeText === "ERR") return;
+
+        navigator.clipboard
+          .writeText(codeText)
+          .then(() => {
+            // Visual success animation
+            statusLabel.innerText = "✓ Copied!";
+            statusLabel.style.color = "#28a745";
+            container.style.transform = "scale(0.97)";
+
+            setTimeout(() => {
+              statusLabel.innerText = "Tap to Copy Code";
+              statusLabel.style.color = "#007bff";
+              container.style.transform = "scale(1)";
+            }, 1200);
+          })
+          .catch((err) => {
+            console.error("Clipboard copy failed: ", err);
+          });
+      }
+
       function init() {
         const urlParams = new URLSearchParams(window.location.search);
         const urlSecret = urlParams.get("secret");
@@ -152,6 +207,7 @@
           if (code === "INVALID_SECRET") {
             document.getElementById("otp-display").innerText = "ERR";
             document.getElementById("timer").innerText = "--";
+            document.getElementById("copy-status").innerText = "Format Error";
             alert(
               "The secret provided in the URL contains invalid Base32 characters.",
             );
