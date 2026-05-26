@@ -2,43 +2,174 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TOTP Viewer</title>
-    <script src="https://jsdelivr.net"></script>
   </head>
-  <body>
-    <h1>Current TOTP Code</h1>
-    <div id="otp-display" style="font-size: 3em; font-weight: bold">
-      Loading...
+  <body
+    style="
+      font-family:
+        system-ui,
+        -apple-system,
+        sans-serif;
+      text-align: center;
+      padding-top: 50px;
+      background-color: #f4f7f9;
+      color: #333;
+    "
+  >
+    <div id="totp-zone" style="display: none">
+      <h1>Current TOTP Code</h1>
+      <div
+        id="otp-display"
+        style="
+          font-size: 5em;
+          font-weight: bold;
+          letter-spacing: 5px;
+          margin: 20px 0;
+          color: #28a745;
+          font-family: monospace;
+        "
+      >
+        000000
+      </div>
+      <p style="font-size: 1.2em; color: #555">
+        Time remaining:
+        <span id="timer" style="font-weight: bold; color: #dc3545">--</span>s
+      </p>
     </div>
-    <p>Time remaining: <span id="timer">--</span>s</p>
+
+    <div
+      id="error-zone"
+      style="
+        display: none;
+        max-width: 400px;
+        margin: 0 auto;
+        padding: 20px;
+        border: 1px dashed #ccc;
+        background: white;
+        border-radius: 6px;
+      "
+    >
+      <h3 style="color: #dc3545; margin-top: 0">Secret Missing</h3>
+      <p style="font-size: 0.95em; color: #666; line-height: 1.5">
+        Please append your Base32 secret to the URL parameter to view the code.
+      </p>
+      <code
+        style="
+          background: #eee;
+          padding: 5px 10px;
+          display: block;
+          word-break: break-all;
+          border-radius: 4px;
+          margin-top: 10px;
+        "
+        >?secret=YOUR_SECRET_HERE</code
+      >
+    </div>
 
     <script>
-      // Fetch secret from URL parameter for security (?secret=YOUR_SECRET)
-      const urlParams = new URLSearchParams(window.location.search);
-      const secret = urlParams.get("secret");
+      let intervalId = null;
 
-      if (secret) {
-        const totp = new OTPAuth.TOTP({
-          issuer: "MySite",
-          label: "User",
-          algorithm: "SHA1",
-          digits: 6,
-          period: 30,
-          secret: secret,
-        });
+      // Decodes Base32 into byte array natively
+      function base32ToBuf(str) {
+        const b32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        str = str
+          .replace(/[\s-]+/g, "")
+          .replace(/=+$/, "")
+          .toUpperCase();
+        let bits = "";
+        for (let i = 0; i < str.length; i++) {
+          const val = b32chars.indexOf(str.charAt(i));
+          if (val === -1) throw new Error("Invalid character");
+          bits += val.toString(2).padStart(5, "0");
+        }
+        const buf = new Uint8Array(Math.floor(bits.length / 8));
+        for (let i = 0; i < buf.length; i++) {
+          buf[i] = parseInt(bits.substr(i * 8, 8), 2);
+        }
+        return buf;
+      }
 
-        function updateOTP() {
-          document.getElementById("otp-display").innerText = totp.generate();
+      // Native Web Crypto API TOTP Engine
+      async function generateTOTP(secretStr) {
+        try {
+          const keyData = base32ToBuf(secretStr);
+          const epoch = Math.floor(Date.now() / 1000);
+          const timeStep = Math.floor(epoch / 30);
+
+          const timeBuffer = new ArrayBuffer(8);
+          const view = new DataView(timeBuffer);
+          view.setUint32(4, timeStep, false);
+
+          const cryptoKey = await window.crypto.subtle.importKey(
+            "raw",
+            keyData,
+            { name: "HMAC", hash: { name: "SHA-1" } },
+            false,
+            ["sign"],
+          );
+
+          const signature = await window.crypto.subtle.sign(
+            "HMAC",
+            cryptoKey,
+            timeBuffer,
+          );
+          const hmacResult = new Uint8Array(signature);
+
+          const offset = hmacResult[hmacResult.length - 1] & 0xf;
+          const binary =
+            ((hmacResult[offset] & 0x7f) << 24) |
+            ((hmacResult[offset + 1] & 0xff) << 16) |
+            ((hmacResult[offset + 2] & 0xff) << 8) |
+            (hmacResult[offset + 3] & 0xff);
+
+          const otp = binary % 1000000;
+          return otp.toString().padStart(6, "0");
+        } catch (err) {
+          return "INVALID_SECRET";
+        }
+      }
+
+      function init() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlSecret = urlParams.get("secret");
+
+        if (urlSecret && urlSecret.trim()) {
+          document.getElementById("error-zone").style.display = "none";
+          document.getElementById("totp-zone").style.display = "block";
+          startTOTP(urlSecret.trim());
+        } else {
+          document.getElementById("totp-zone").style.display = "none";
+          document.getElementById("error-zone").style.display = "block";
+          if (intervalId) clearInterval(intervalId);
+        }
+      }
+
+      function startTOTP(secretStr) {
+        async function updateOTP() {
+          const code = await generateTOTP(secretStr);
+
+          if (code === "INVALID_SECRET") {
+            document.getElementById("otp-display").innerText = "ERR";
+            document.getElementById("timer").innerText = "--";
+            alert(
+              "The secret provided in the URL contains invalid Base32 characters.",
+            );
+            if (intervalId) clearInterval(intervalId);
+            return;
+          }
+
+          document.getElementById("otp-display").innerText = code;
           const seconds = Math.floor(Date.now() / 1000);
           document.getElementById("timer").innerText = 30 - (seconds % 30);
         }
 
-        setInterval(updateOTP, 1000);
         updateOTP();
-      } else {
-        document.getElementById("otp-display").innerText =
-          "Please provide a secret in the URL.";
+        if (intervalId) clearInterval(intervalId);
+        intervalId = setInterval(updateOTP, 1000);
       }
+
+      window.onload = init;
     </script>
   </body>
 </html>
