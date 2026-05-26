@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>TOTP Viewer</title>
+    <script src="https://jsdelivr.net"></script>
+  </head>
+  <body>
+    <h1>Current TOTP Code</h1>
+    <div id="otp-display" style="font-size: 3em; font-weight: bold">
+      Loading...
+    </div>
+    <p>Time remaining: <span id="timer">--</span>s</p>
+
+    <script>
+      // Fetch secret from URL parameter for security (?secret=YOUR_SECRET)
+      const urlParams = new URLSearchParams(window.location.search);
+      const secret = urlParams.get("secret");
+
+      if (secret) {
+        const totp = new OTPAuth.TOTP({
+          issuer: "MySite",
+          label: "User",
+          algorithm: "SHA1",
+          digits: 6,
+          period: 30,
+          secret: secret,
+        });
+
+        function updateOTP() {
+          document.getElementById("otp-display").innerText = totp.generate();
+          const seconds = Math.floor(Date.now() / 1000);
+          document.getElementById("timer").innerText = 30 - (seconds % 30);
+        }
+
+        setInterval(updateOTP, 1000);
+        updateOTP();
+      } else {
+        document.getElementById("otp-display").innerText =
+          "Please provide a secret in the URL.";
+      }
+    </script>
+  </body>
+</html>
